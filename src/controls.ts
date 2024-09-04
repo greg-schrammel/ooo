@@ -1,8 +1,8 @@
 const controls = {
-  forward: ['ArrowUp', 'w'],
-  back: ['ArrowDown', 's'],
-  left: ['ArrowLeft', 'a'],
-  right: ['ArrowRight', 'd'],
+  forward: ['ArrowUp', 'w', 'W'],
+  back: ['ArrowDown', 's', 'S'],
+  left: ['ArrowLeft', 'a', 'A'],
+  right: ['ArrowRight', 'd', 'D'],
   dodge: ['Shift'],
 }
 

@@ -13,15 +13,30 @@ import {
   Color,
   Fog,
   CustomToneMapping,
-  CircleGeometry,
-  LineLoop,
   BufferGeometry,
   Line,
   Group,
+  Clock,
+  BufferAttribute,
+  AmbientLight,
+  HemisphereLight,
+  AnimationMixer,
+  AnimationClip,
+  AnimationAction,
 } from 'three'
 import { $activeControls, addControlsListeners } from './controls'
 import { clamp } from 'three/src/math/MathUtils.js'
-import { lerpRadians } from './math'
+import { add, lerpRadians } from './math'
+
+import { World, ColliderDesc, RigidBodyDesc, init, Collider } from '@dimforge/rapier3d-compat'
+import Stats from 'three/examples/jsm/libs/stats.module.js'
+
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js'
+
+await init()
+
+const gravity = { x: 0, y: 0, z: 0 }
+const $world = new World(gravity)
 
 const $cameraOffset = { x: 8, y: 12, z: -8 }
 function perspectiveCamera() {
@@ -47,19 +62,40 @@ function setupScene() {
   const gridHelper = new GridHelper(100, 100, `#b2b8bf`, `#b2b8bf`)
   scene.add(gridHelper)
 
-  return scene
-}
+  scene.add(new AmbientLight(0xffffff, 1))
 
-function createCircle() {
-  const circleGeometry = new EdgesGeometry(new CircleGeometry(1.2, 20))
-  circleGeometry.rotateX(Math.PI / 2)
-  return new LineLoop(circleGeometry, new LineBasicMaterial({ color: 'orange' }))
+  scene.add(new HemisphereLight(0xffffbb, 0x080820, 1))
+
+  return scene
 }
 
 const _debug_ = true
 
-function playerObject3D() {
+const loader = new GLTFLoader()
+const barbarian = await loader.loadAsync('barbarian.glb')
+barbarian.scene.receiveShadow = true
+
+function createPlayerObject3d(position: Vector3) {
   const group = new Group()
+  group.position.add(position)
+
+  const facingDirectionLine = new Line(
+    new BufferGeometry().setFromPoints([new Vector3(0, 0, 0), new Vector3(0, 0, 1.2)]),
+    new LineBasicMaterial({ color: 'black' }),
+  )
+
+  group.add(barbarian.scene)
+
+  if (_debug_) {
+    group.add(facingDirectionLine)
+  }
+
+  return group
+}
+
+function createCharacterObject3d(position: Vector3) {
+  const group = new Group()
+  group.position.add(position)
 
   const geometry = new BoxGeometry(1, 1, 1)
   const material = new MeshBasicMaterial({ color: 0xffffff })
@@ -69,10 +105,12 @@ function playerObject3D() {
   const edges = new EdgesGeometry(geometry)
   const edgesLines = new LineSegments(edges, new LineBasicMaterial({ color: 0xfff }))
 
-  const hitbox = createCircle()
+  // const circleGeometry = new EdgesGeometry(new CircleGeometry(1, 20))
+  // circleGeometry.rotateX(Math.PI / 2)
+  // const hitbox = new LineLoop(circleGeometry, new LineBasicMaterial({ color: 'orange' }))
 
   const facingDirectionLine = new Line(
-    new BufferGeometry().setFromPoints([new Vector3(0, 0, 0), new Vector3(0, 0, 1.5)]),
+    new BufferGeometry().setFromPoints([new Vector3(0, 0, 0), new Vector3(0, 0, 1.2)]),
     new LineBasicMaterial({ color: 'black' }),
   )
 
@@ -80,19 +118,35 @@ function playerObject3D() {
 
   if (_debug_) {
     cube.add(edgesLines)
-    group.add(hitbox)
+    // group.add(hitbox)
     group.add(facingDirectionLine)
   }
 
   return group
 }
 
+function createCharacterRigidBody(position: Vector3) {
+  const rigidBodyDesc = RigidBodyDesc.kinematicPositionBased()
+  const rigidBody = $world.createRigidBody(rigidBodyDesc)
+  rigidBody.setTranslation({ x: position.x, y: position.y, z: position.z }, true)
+
+  const bodyColliderDesc = ColliderDesc.cylinder(0.5, 0.7).setTranslation(0, 0.5, 0)
+  const bodyCollider = $world.createCollider(bodyColliderDesc, rigidBody)
+
+  return {
+    rigidBody,
+    bodyCollider,
+  }
+}
+
+const position = new Vector3(0, 0, 0)
 const $player = {
-  position: new Vector3(0, 0, 0),
+  position,
   rotation: 0,
   lastMoveAt: 0,
   speed: 1,
-  object3D: playerObject3D(),
+  object3D: createPlayerObject3d(position),
+  ...createCharacterRigidBody(position),
 }
 
 const $scene = setupScene()
@@ -100,14 +154,18 @@ const $camera = perspectiveCamera()
 const $renderer = setupRenderer()
 document.body.appendChild($renderer.domElement)
 
-// const controls = new OrbitControls($camera, $renderer.domElement)
-
 $scene.add($player.object3D)
+
+// npc
+const npc_position = new Vector3(3, 0, 3)
+createCharacterRigidBody(npc_position)
+$scene.add(createCharacterObject3d(npc_position))
+//
 
 addControlsListeners()
 
 function impulseInput() {
-  const { back, forward, left, right, dodge } = $activeControls
+  const { back, forward, left, right } = $activeControls
 
   let x = 0
   let z = 0
@@ -126,54 +184,95 @@ function impulseInput() {
   const impulse = inputVector
     .normalize()
     .multiplyScalar(clamp(inputVector.length(), 0, 1)) // joysticks can go slower than 1
-    .multiplyScalar(dodge ? 10 : 1)
+    .multiplyScalar(0.1)
 
   return impulse
 }
 
 const TICK_ms = 15 // 15ms
 
-const updatePlayerPosition = (deltaTime: number) => {
-  if (performance.now() - $player.lastMoveAt > TICK_ms) {
-    // only move once per tick
-    $player.lastMoveAt = performance.now()
+const mixer = new AnimationMixer(barbarian.scene)
 
-    const impulse = impulseInput()
-    $player.position = $player.position.add(impulse.multiplyScalar(0.1 * $player.speed))
-    if (impulse.length()) $player.rotation = Math.atan2(impulse.x, impulse.z)
+const idleClip = AnimationClip.findByName(barbarian.animations, 'Idle')
+const idleAction = mixer.clipAction(idleClip)
+
+const runClip = AnimationClip.findByName(barbarian.animations, 'Running_B')
+const runAction = mixer.clipAction(runClip)
+runAction.timeScale = 2.2
+
+let currentAction: AnimationAction = idleAction.play()
+
+const updatePlayerPosition = (deltaTime: number) => {
+  const isMoving = $player.object3D.position.distanceTo($player.position) >= 0.1
+  const targetAction = isMoving ? runAction : idleAction
+
+  if (currentAction !== targetAction) {
+    const fadeDuration = isMoving ? 0.5 : 0.2
+    targetAction.reset().crossFadeFrom(currentAction, fadeDuration, false).play()
+    currentAction = targetAction
   }
+
+  if (!isMoving) return
 
   const lerpFactor = 1 - 0.0001 ** deltaTime
   $player.object3D.position.lerp($player.position, lerpFactor)
   $player.object3D.rotation.y = lerpRadians($player.object3D.rotation.y, $player.rotation, lerpFactor)
-  // $camera.lookAt($player.object3D.position)
   $camera.position.lerp(
     $player.object3D.position.clone().add($cameraOffset),
-    lerpFactor, // delay camera behind
+    1 - 0.001 ** deltaTime, // delay camera behind
   )
 }
 
-let initFpsRecord = performance.now()
-let fps_counter = 0
-function trackFps(onUpdate: (fps: number) => void) {
-  fps_counter++
-  if (performance.now() - initFpsRecord > 1000) {
-    onUpdate(fps_counter)
-    fps_counter = 0
-    initFpsRecord = performance.now()
-  }
+const rapierDebugMesh = new LineSegments(
+  new BufferGeometry(),
+  new LineBasicMaterial({ color: 0xffffff, vertexColors: true }),
+)
+rapierDebugMesh.frustumCulled = false
+$scene.add(rapierDebugMesh)
+
+function updateRapierDebugMesh() {
+  const { vertices, colors } = $world.debugRender()
+  rapierDebugMesh.geometry.setAttribute('position', new BufferAttribute(vertices, 3))
+  rapierDebugMesh.geometry.setAttribute('color', new BufferAttribute(colors, 4))
 }
 
-let prevFrameTimestamp = performance.now()
-function animate() {
-  const frameTimestamp = performance.now()
-  const deltaTime = (frameTimestamp - prevFrameTimestamp) * 0.001 // in seconds
-  prevFrameTimestamp = frameTimestamp
+function computeMoviment(collider: Collider, impulse: Vector3) {
+  const controller = $world.createCharacterController(0.05)
+  controller.computeColliderMovement(collider, impulse)
+  const correctedMovement = controller.computedMovement()
+  return correctedMovement
+}
 
-  // trackFps((fps) => console.log(fps))
+function onTick() {
+  $world.step()
+
+  const impulse = impulseInput()
+  const movement = computeMoviment($player.bodyCollider, impulse)
+  const position = add($player.position, movement)
+  $player.position = new Vector3(position.x, position.y, position.z)
+  $player.rigidBody.setNextKinematicTranslation(position)
+
+  if (_debug_) {
+    updateRapierDebugMesh()
+  }
+
+  if (impulse.length()) $player.rotation = Math.atan2(impulse.x, impulse.z)
+}
+
+const clock = new Clock()
+const stats = new Stats()
+document.body.appendChild(stats.dom)
+
+function animate() {
+  const deltaTime = clock.getDelta()
 
   updatePlayerPosition(deltaTime)
 
   $renderer.render($scene, $camera)
+
+  mixer.update(deltaTime)
+
+  stats.update()
 }
 $renderer.setAnimationLoop(animate)
+setInterval(onTick, TICK_ms)

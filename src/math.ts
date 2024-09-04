@@ -1,3 +1,4 @@
+import { Vector } from 'three/examples/jsm/Addons.js'
 import { lerp } from 'three/src/math/MathUtils.js'
 
 type Radians = number // number between Pi and -Pi
@@ -24,4 +25,12 @@ export function lerpRadians(angleFrom: Radians, angleTo: Radians, lerpFactor: nu
 
   // straight lerp
   return lerp(angleFrom, angleTo, lerpFactor)
+}
+
+export function add(a: Vector, b: Vector): Vector {
+  return {
+    x: a.x + b.x,
+    y: a.y + b.y,
+    z: a.z + b.z,
+  }
 }
