@@ -64,7 +64,7 @@ function setupScene() {
 
   scene.add(new AmbientLight(0xffffff, 1))
 
-  scene.add(new HemisphereLight(0xffffbb, 0x080820, 1))
+  scene.add(new HemisphereLight(0xffffbb, 0xffd4bb, 1))
 
   return scene
 }
@@ -72,6 +72,7 @@ function setupScene() {
 const _debug_ = true
 
 const loader = new GLTFLoader()
+
 const barbarian = await loader.loadAsync('barbarian.glb')
 barbarian.scene.receiveShadow = true
 
@@ -105,10 +106,6 @@ function createCharacterObject3d(position: Vector3) {
   const edges = new EdgesGeometry(geometry)
   const edgesLines = new LineSegments(edges, new LineBasicMaterial({ color: 0xfff }))
 
-  // const circleGeometry = new EdgesGeometry(new CircleGeometry(1, 20))
-  // circleGeometry.rotateX(Math.PI / 2)
-  // const hitbox = new LineLoop(circleGeometry, new LineBasicMaterial({ color: 'orange' }))
-
   const facingDirectionLine = new Line(
     new BufferGeometry().setFromPoints([new Vector3(0, 0, 0), new Vector3(0, 0, 1.2)]),
     new LineBasicMaterial({ color: 'black' }),
@@ -118,7 +115,6 @@ function createCharacterObject3d(position: Vector3) {
 
   if (_debug_) {
     cube.add(edgesLines)
-    // group.add(hitbox)
     group.add(facingDirectionLine)
   }
 
@@ -162,6 +158,19 @@ createCharacterRigidBody(npc_position)
 $scene.add(createCharacterObject3d(npc_position))
 //
 
+const axe = await loader.loadAsync('axe.glb')
+const leftHand = $player.object3D.getObjectByName('handslotl')
+leftHand?.add(axe.scene)
+
+const axe2 = axe.scene.clone()
+axe2.rotation.y = Math.PI
+const rightHand = $player.object3D.getObjectByName('handslotr')
+rightHand?.add(axe2)
+
+const hat = await loader.loadAsync('bearhat.glb')
+const head = $player.object3D.getObjectByName('head')
+head?.add(hat.scene)
+
 addControlsListeners()
 
 function impulseInput() {
@@ -196,9 +205,9 @@ const mixer = new AnimationMixer(barbarian.scene)
 const idleClip = AnimationClip.findByName(barbarian.animations, 'Idle')
 const idleAction = mixer.clipAction(idleClip)
 
-const runClip = AnimationClip.findByName(barbarian.animations, 'Running_B')
+const runClip = AnimationClip.findByName(barbarian.animations, 'Running_A')
 const runAction = mixer.clipAction(runClip)
-runAction.timeScale = 2.2
+runAction.timeScale = 1.5
 
 let currentAction: AnimationAction = idleAction.play()
 
@@ -207,7 +216,7 @@ const updatePlayerPosition = (deltaTime: number) => {
   const targetAction = isMoving ? runAction : idleAction
 
   if (currentAction !== targetAction) {
-    const fadeDuration = isMoving ? 0.5 : 0.2
+    const fadeDuration = 0.15
     targetAction.reset().crossFadeFrom(currentAction, fadeDuration, false).play()
     currentAction = targetAction
   }
@@ -217,10 +226,7 @@ const updatePlayerPosition = (deltaTime: number) => {
   const lerpFactor = 1 - 0.0001 ** deltaTime
   $player.object3D.position.lerp($player.position, lerpFactor)
   $player.object3D.rotation.y = lerpRadians($player.object3D.rotation.y, $player.rotation, lerpFactor)
-  $camera.position.lerp(
-    $player.object3D.position.clone().add($cameraOffset),
-    1 - 0.001 ** deltaTime, // delay camera behind
-  )
+  $camera.position.lerp($player.object3D.position.clone().add($cameraOffset), 1 - 0.001 ** deltaTime)
 }
 
 const rapierDebugMesh = new LineSegments(
